@@ -1,23 +1,26 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module SpacedRepetition where
+module SpacedRepetition
+    ( R, S, D, T, Grade(..), retrievability, interval, stability, difficulty, toDouble
+    ) where
 
-import Data.List (genericIndex)
-import Data.Fixed (mod')
+import Data.Coerce (coerce)
+import Language.Haskell.TH
 
--- Newtypes for strong typing
-newtype R = R Double deriving (Show, Eq, Ord, Num, Fractional, Floating)
-newtype S = S Double deriving (Show, Eq, Ord, Num, Fractional, Floating)
-newtype D = D Double deriving (Show, Eq, Ord, Num, Fractional, Floating)
-newtype T = T Double deriving (Show, Eq, Ord, Num, Fractional, Floating)
+-- Generate newtypes programmatically
+makeNewtype :: String -> Q [Dec]
+makeNewtype name = do
+    let tyName = mkName name
+    [d| newtype $(conT tyName) = $(conT tyName) Double
+          deriving (Show, Eq, Ord, Num, Fractional, Floating) |]
 
--- Weights array as a strongly typed list
-weights :: [Double]
-weights =
-    [ 0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046,
-      1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315,
-      2.9898, 0.51655, 0.6621
-    ]
+-- Generate newtypes for R, S, D, T
+concat <$> mapM makeNewtype ["R", "S", "D", "T"]
+
+-- Polymorphic unwrapping function
+toDouble :: Coercible a Double => a -> Double
+toDouble = coerce
 
 -- Grade Enum
 data Grade = Forgot | Hard | Good | Easy
@@ -34,13 +37,30 @@ fConst, cConst :: Double
 fConst = 19.0 / 81.0
 cConst = -0.5
 
--- Function definitions
-retrievability :: T -> S -> R
-retrievability (T t) (S s) = R $ (1.0 + fConst * (t / s)) ** cConst
+weights :: [Double]
+weights =
+    [ 0.40255, 1.18385, 3.173, 15.69105, 7.1949, 0.5345, 1.4604, 0.0046,
+      1.54575, 0.1192, 1.01925, 1.9395, 0.11, 0.29605, 2.2698, 0.2315,
+      2.9898, 0.51655, 0.6621
+    ]
 
-interval :: R -> S -> T
-interval (R rD) (S s) = T $ (s / fConst) * ((rD ** (1.0 / cConst)) - 1.0)
+-- Final Functions
+retrievability :: T -> S -> Double
+retrievability (T t) (S s) = (1.0 + fConst * (t / s)) ** cConst
 
+interval :: R -> S -> Double
+interval (R rD) (S s) = (s / fConst) * ((rD ** (1.0 / cConst)) - 1.0)
+
+stability :: D -> S -> R -> Grade -> Double
+stability d s r g = toDouble $
+    case g of
+        Forgot -> sFail d s r
+        _      -> sSuccess d s r g
+
+difficulty :: D -> Grade -> Double
+difficulty d g = toDouble $ clampD (D (weights !! 7 * toDouble (d0 Easy) + (1.0 - weights !! 7) * dp d g))
+
+-- Internal Functions
 s0 :: Grade -> S
 s0 g = S $ weights !! fromEnum g
 
@@ -53,7 +73,7 @@ sSuccess (D d) (S s) (R r) g =
         b  = if g == Easy then weights !! 16 else 1.0
         c  = exp (weights !! 8)
         alpha = 1.0 + tD * tS * tR * h * b * c
-    in S $ s * alpha
+    in S (s * alpha)
 
 sFail :: D -> S -> R -> S
 sFail (D d) (S s) (R r) =
@@ -62,24 +82,13 @@ sFail (D d) (S s) (R r) =
         rF = exp (weights !! 14 * (1.0 - r))
         cF = weights !! 11
         sF' = dF * sF * rF * cF
-    in S $ min sF' s
-
-stability :: D -> S -> R -> Grade -> S
-stability d s r Forgot = sFail d s r
-stability d s r g      = sSuccess d s r g
+    in S (min sF' s)
 
 clampD :: D -> D
-clampD (D d) = D $ max 1.0 (min 10.0 d)
+clampD (D d) = D (max 1.0 (min 10.0 d))
 
 d0 :: Grade -> D
-d0 g =
-    let gVal = gradeToDouble g
-    in clampD $ D (weights !! 4 - exp (weights !! 5 * (gVal - 1.0)) + 1.0)
-
-difficulty :: D -> Grade -> D
-difficulty d g = clampD $ D (weights !! 7 * unD (d0 Easy) + (1.0 - weights !! 7) * dp d g)
-  where
-    unD (D x) = x
+d0 g = clampD $ D (weights !! 4 - exp (weights !! 5 * (gradeToDouble g - 1.0)) + 1.0)
 
 dp :: D -> Grade -> Double
 dp (D d) g = d + deltaD g * ((10.0 - d) / 9.0)
