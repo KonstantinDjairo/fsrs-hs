@@ -5,18 +5,11 @@ module SpacedRepetition
     ( R, S, D, T, Grade(..), retrievability, interval, stability, difficulty, toDouble
     ) where
 
-import Data.Coerce (coerce)
-import Language.Haskell.TH
-
--- Generate newtypes programmatically
-makeNewtype :: String -> Q [Dec]
-makeNewtype name = do
-    let tyName = mkName name
-    [d| newtype $(conT tyName) = $(conT tyName) Double
-          deriving (Show, Eq, Ord, Num, Fractional, Floating) |]
+import Data.Coerce 
+import SpacedRepetition.TH (makeNewtype)
 
 -- Generate newtypes for R, S, D, T
-concat <$> mapM makeNewtype ["R", "S", "D", "T"]
+$(concat <$> mapM makeNewtype ["R", "S", "D", "T"])
 
 -- Polymorphic unwrapping function
 toDouble :: Coercible a Double => a -> Double
